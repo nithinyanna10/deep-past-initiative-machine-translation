@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Data (keep structure but ignore large files if needed)
+# *.csv
+data/*.csv
+!data/train_clean.csv
+
+# Models and checkpoints
+models/*.pt
+models/*.pth
+models/*.ckpt
+models/checkpoints/
+*.pkl
+*.h5
+
+# Submissions
+submissions/*.csv
+!submissions/.gitkeep
+
+# Logs
+*.log
+logs/
+wandb/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+
