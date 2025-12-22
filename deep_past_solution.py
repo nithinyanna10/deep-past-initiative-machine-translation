@@ -686,31 +686,56 @@ def _add_context(pairs: List[Dict], doc_chunks: Dict) -> List[Dict]:
 
 def compute_metrics(eval_pred, tokenizer):
     """Compute BLEU and chrF++ metrics"""
-    predictions, labels = eval_pred
-    
-    # Decode predictions
-    decoded_preds = tokenizer.batch_decode(predictions, skip_special_tokens=True)
-    
-    # Replace -100 in labels with pad token id
-    labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
+    preds, labels = eval_pred
+
+    # 1) Handle tuple predictions (common with Seq2SeqTrainer)
+    if isinstance(preds, tuple):
+        preds = preds[0]
+
+    preds = np.array(preds)
+
+    # 2) If preds are logits: (B, T, V) -> argmax -> (B, T)
+    if preds.ndim == 3:
+        preds = np.argmax(preds, axis=-1)
+
+    preds = preds.astype(np.int64)
+
+    # 3) Labels: replace -100 with pad for decoding
+    pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
+    labels = np.array(labels)
+    labels = np.where(labels == -100, pad_id, labels).astype(np.int64)
+
+    # 4) Sanitize IDs: tokenizer expects vocab IDs, not unicode codepoints
+    vocab = getattr(tokenizer, "vocab_size", None)
+    unk_id = tokenizer.unk_token_id if tokenizer.unk_token_id is not None else pad_id
+    if vocab is not None:
+        preds = np.where((preds >= 0) & (preds < vocab), preds, unk_id)
+        labels = np.where((labels >= 0) & (labels < vocab), labels, unk_id)
+
+    # 5) Decode
+    decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
     decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
-    
-    # Compute BLEU
-    bleu = corpus_bleu(decoded_preds, [decoded_labels])
-    bleu_score = bleu.score
-    
-    # Compute chrF++ (word_order=2)
-    chrf = corpus_chrf(decoded_preds, [decoded_labels], word_order=2)
-    chrf_score = chrf.score
-    
-    # Geometric mean
-    final_score = np.sqrt(bleu_score * chrf_score)
-    
-    return {
-        'bleu': bleu_score,
-        'chrf++': chrf_score,
-        'final': final_score,
-    }
+
+    decoded_preds = [s.strip().replace("\n", " ") for s in decoded_preds]
+    decoded_labels = [s.strip().replace("\n", " ") for s in decoded_labels]
+
+    # Debug: print sample predictions
+    logger.info("\nSample predictions for metrics:")
+    for i in range(min(3, len(decoded_preds))):
+        logger.info(f"PRED[{i}]: {decoded_preds[i][:200]}")
+        logger.info(f"REF[{i}]: {decoded_labels[i][:200]}")
+
+    # Optional: guard against empty strings wrecking everything
+    # (keeps metric meaningful if something goes very wrong)
+    if all(len(s) == 0 for s in decoded_preds) or all(len(s) == 0 for s in decoded_labels):
+        logger.warning("All predictions or labels are empty! Returning zero metrics.")
+        return {"bleu": 0.0, "chrf++": 0.0, "final": 0.0}
+
+    bleu = corpus_bleu(decoded_preds, [decoded_labels]).score
+    chrfpp = corpus_chrf(decoded_preds, [decoded_labels], word_order=2).score
+    final = float(np.sqrt(max(bleu, 0.0) * max(chrfpp, 0.0)))
+
+    return {"bleu": bleu, "chrf++": chrfpp, "final": final}
 
 
 def train_model(
@@ -803,13 +828,24 @@ def train_model(
         metric_for_best_model="final",
         greater_is_better=True,
         predict_with_generate=True,
-        generation_max_length=max_target_len,
         generation_num_beams=num_beams,
-        generation_max_new_tokens=80,  # Default, can be overridden
+        generation_max_length=max_target_len,  # Fallback if max_new_tokens not supported
         logging_steps=50,
         report_to=None,
         dataloader_pin_memory=False,  # Disable pinning on macOS
     )
+    
+    # Try to use generation_max_new_tokens if supported (newer transformers)
+    try:
+        # Check if the argument exists by trying to set it
+        if hasattr(Seq2SeqTrainingArguments, '__init__'):
+            # Try setting it - if it fails, generation_max_length will be used
+            try:
+                training_args.generation_max_new_tokens = max_target_len
+            except:
+                pass  # Fall back to generation_max_length
+    except:
+        pass
     
     if smoke_mode:
         training_args.max_steps = 50
