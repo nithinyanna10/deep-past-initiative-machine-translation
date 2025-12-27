@@ -47,5 +47,4 @@ Geometric Mean of BLEU and chrF++ scores (micro-averaged)
 - Competition: [Deep Past Challenge](https://www.kaggle.com/competitions/deep-past-challenge)
 - Dataset Instructions: See competition page
 - OARE Database: https://oare.byu.edu/
-- CDLI: https://cdli.earth/
 
