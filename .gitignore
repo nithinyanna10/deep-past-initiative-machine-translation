@@ -24,6 +24,8 @@ ENV/
 # *.csv
 data/*.csv
 !data/train_clean.csv
+# Large CSV files that exceed GitHub's 100MB limit
+publications.csv
 
 # Models and checkpoints
 models/*.pt
